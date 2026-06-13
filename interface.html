@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PetFeeder</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #1a1d24;
+    --card2: #22262f;
+    --accent: #4ade80;
+    --accent-dim: #2a5e3f;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --danger: #f87171;
+    --warn: #fbbf24;
+    --border: #2e333d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 16px;
+    max-width: 480px;
+    margin: 0 auto;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  /* Status grid */
+  .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat {
+    background: var(--card2);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+  .stat .value { font-size: 20px; font-weight: 700; margin-top: 4px; }
+  /* Nivel bar */
+  .nivel-wrap { margin-top: 4px; }
+  .nivel-bar-bg {
+    height: 22px;
+    background: var(--card2);
+    border-radius: 11px;
+    overflow: hidden;
+    position: relative;
+  }
+  .nivel-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+    border-radius: 11px;
+    transition: width 0.5s ease;
+    width: 0%;
+  }
+  .nivel-bar-text {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
+  }
+  /* Alertas */
+  .alert {
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    display: none;
+  }
+  .alert.danger { background: rgba(248,113,113,0.15); border: 1px solid var(--danger); color: var(--danger); }
+  .alert.warn { background: rgba(251,191,36,0.15); border: 1px solid var(--warn); color: var(--warn); }
+  .alert.show { display: block; }
+  /* Inputs e botoes */
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input[type=number], input[type=time] {
+    width: 100%;
+    background: var(--card2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    color: var(--text);
+    font-size: 16px;
+  }
+  .row { display: flex; gap: 10px; align-items: flex-end; }
+  .row > div { flex: 1; }
+  button {
+    background: var(--accent);
+    color: #06210f;
+    border: none;
+    border-radius: 10px;
+    padding: 13px 16px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    width: 100%;
+    transition: opacity 0.15s;
+  }
+  button:active { opacity: 0.7; }
+  button.secondary { background: var(--card2); color: var(--text); border: 1px solid var(--border); }
+  button.small { width: auto; padding: 8px 12px; font-size: 13px; }
+  button.danger-btn { background: var(--danger); color: #2a0a0a; }
+  .feed-now {
+    background: var(--accent);
+    font-size: 17px;
+    padding: 16px;
+  }
+  /* Lista de horarios */
+  .horario-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--card2);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+  }
+  .horario-item .info { font-size: 15px; font-weight: 600; }
+  .horario-item .info span { color: var(--accent); }
+  .add-horario { margin-top: 10px; }
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: #06210f;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    z-index: 100;
+  }
+  .toast.show { opacity: 1; }
+  .conv { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:6px; }
+  .dot.on { background: var(--accent); }
+</style>
+</head>
+<body>
+ 
+<h1>🐾 PetFeeder</h1>
+<div class="sub"><span class="dot" id="conn-dot"></span><span id="conn-text">conectando...</span></div>
+ 
+<!-- Alertas -->
+<div class="alert danger" id="alert-racao">⚠️ Não foi detectada queda de ração — o reservatório pode estar vazio ou travado.</div>
+<div class="alert warn" id="alert-nivel">⚠️ Nível de ração baixo — encha o reservatório.</div>
+ 
+<!-- Status -->
+<div class="card">
+  <h2>Status</h2>
+  <div class="nivel-wrap">
+    <label>Nível do reservatório</label>
+    <div class="nivel-bar-bg">
+      <div class="nivel-bar-fill" id="nivel-fill"></div>
+      <div class="nivel-bar-text" id="nivel-text">--%</div>
+    </div>
+  </div>
+  <div class="status-grid" style="margin-top:14px;">
+    <div class="stat">
+      <div class="label">Estado</div>
+      <div class="value" id="status-val">--</div>
+    </div>
+    <div class="stat">
+      <div class="label">Última porção</div>
+      <div class="value" id="ultima-val">--</div>
+    </div>
+  </div>
+</div>
+ 
+<!-- Alimentar agora -->
+<div class="card">
+  <h2>Alimentar agora</h2>
+  <label>Tamanho da porção (gramas)</label>
+  <input type="number" id="gramas-manual" value="20" min="1" max="200">
+  <div class="conv" id="conv-manual"></div>
+  <button class="feed-now" style="margin-top:12px;" onclick="alimentarAgora()">🍽️ Alimentar agora</button>
+</div>
+ 
+<!-- Agendamentos -->
+<div class="card">
+  <h2>Horários agendados</h2>
+  <div id="lista-horarios"></div>
+  <div class="add-horario">
+    <div class="row">
+      <div>
+        <label>Horário</label>
+        <input type="time" id="novo-horario" value="08:00">
+      </div>
+      <div>
+        <label>Gramas</label>
+        <input type="number" id="novo-gramas" value="20" min="1" max="200">
+      </div>
+    </div>
+    <button class="secondary" style="margin-top:10px;" onclick="addHorario()">+ Adicionar horário</button>
+  </div>
+</div>
+ 
+<div class="toast" id="toast"></div>
+ 
+<script>
+  // ====== CONFIG ======
+  const DB_URL = "FIREBASE URL";
+  const SECRET = "FIREBASE SECRET";
+  const FATOR_S_POR_G = 0.1;
+  // ====================
+ 
+  let horarios = [];   // [{h:"08:00", g:30}, ...]
+ 
+  // helpers REST
+  async function fbGet(path) {
+    const r = await fetch(`${DB_URL}/${path}.json?auth=${SECRET}`);
+    if (!r.ok) throw new Error("GET falhou");
+    return await r.json();
+  }
+  async function fbSet(path, value) {
+    const r = await fetch(`${DB_URL}/${path}.json?auth=${SECRET}`, {
+      method: "PUT",
+      body: JSON.stringify(value)
+    });
+    if (!r.ok) throw new Error("PUT falhou");
+    return await r.json();
+  }
+ 
+  function toast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    setTimeout(() => t.classList.remove("show"), 1800);
+  }
+ 
+  function setConn(ok) {
+    document.getElementById("conn-dot").classList.toggle("on", ok);
+    document.getElementById("conn-text").textContent = ok ? "conectado" : "sem conexão";
+  }
+ 
+  // converte gramas -> tempo (mostrar pro usuario)
+  function tempoStr(g) {
+    return (g * FATOR_S_POR_G).toFixed(1) + "s";
+  }
+ 
+  // ====== Alimentar agora ======
+  async function alimentarAgora() {
+    const g = parseInt(document.getElementById("gramas-manual").value) || 20;
+    try {
+      await fbSet("config/gramasManual", g);
+      await fbSet("comando/abrirPorta", true);
+      toast("Alimentando " + g + "g!");
+    } catch (e) {
+      toast("Erro ao enviar");
+    }
+  }
+ 
+  // atualiza texto de conversao do manual
+  document.getElementById("gramas-manual").addEventListener("input", (e) => {
+    const g = parseInt(e.target.value) || 0;
+    document.getElementById("conv-manual").textContent = `≈ ${tempoStr(g)} de comporta aberta`;
+  });
+ 
+  // ====== Horarios ======
+  function renderHorarios() {
+    const cont = document.getElementById("lista-horarios");
+    cont.innerHTML = "";
+    if (horarios.length === 0) {
+      cont.innerHTML = '<div style="color:var(--muted);font-size:13px;">Nenhum horário agendado.</div>';
+    }
+    horarios.forEach((item, i) => {
+      const div = document.createElement("div");
+      div.className = "horario-item";
+      div.innerHTML = `
+        <div class="info">🕐 ${item.h} — <span>${item.g}g</span> <span style="color:var(--muted);font-weight:400;">(${tempoStr(item.g)})</span></div>
+        <button class="small danger-btn" onclick="removeHorario(${i})">Remover</button>
+      `;
+      cont.appendChild(div);
+    });
+  }
+ 
+  async function addHorario() {
+    const h = document.getElementById("novo-horario").value;
+    const g = parseInt(document.getElementById("novo-gramas").value) || 20;
+    if (!h) { toast("Escolha um horário"); return; }
+    horarios.push({ h, g });
+    await salvarHorarios();
+    renderHorarios();
+    toast("Horário adicionado");
+  }
+ 
+  async function removeHorario(i) {
+    horarios.splice(i, 1);
+    await salvarHorarios();
+    renderHorarios();
+    toast("Horário removido");
+  }
+ 
+  // monta a string "HH:MM:gramas,HH:MM:gramas" e salva
+  async function salvarHorarios() {
+    const str = horarios.map(x => `${x.h}:${x.g}`).join(",");
+    try { await fbSet("config/horarios", str); }
+    catch (e) { toast("Erro ao salvar"); }
+  }
+ 
+  // le a string do firebase e popula a lista
+  function parseHorarios(str) {
+    horarios = [];
+    if (!str) return;
+    str.split(",").forEach(item => {
+      item = item.trim();
+      const p = item.split(":");
+      if (p.length === 3) {
+        horarios.push({ h: `${p[0]}:${p[1]}`, g: parseInt(p[2]) || 0 });
+      }
+    });
+  }
+ 
+  // ====== Polling de status ======
+  async function atualizar() {
+    try {
+      const dados = await fbGet("");   // le a raiz inteira
+      setConn(true);
+ 
+      // nivel
+      const nivel = dados.nivelPercentual ?? 0;
+      document.getElementById("nivel-fill").style.width = nivel + "%";
+      document.getElementById("nivel-text").textContent = nivel + "%";
+ 
+      // status
+      document.getElementById("status-val").textContent = dados.status || "--";
+ 
+      // ultima porcao + hora
+      const ug = dados.ultimaPorcaoGramas ?? "--";
+      const uh = dados.ultimaPorcaoHora || "--:--";
+      document.getElementById("ultima-val").textContent = `${ug}g · ${uh}`;
+ 
+      // alertas
+      document.getElementById("alert-racao").classList.toggle("show", dados.alerta === "sem racao");
+      document.getElementById("alert-nivel").classList.toggle("show", dados.alertaNivel === "baixo");
+ 
+      // horarios (so atualiza a lista se nao estiver editando)
+      if (dados.config && dados.config.horarios !== undefined) {
+        const atual = horarios.map(x => `${x.h}:${x.g}`).join(",");
+        if (atual !== dados.config.horarios) {
+          parseHorarios(dados.config.horarios);
+          renderHorarios();
+        }
+      }
+      // gramas manual
+      if (dados.config && dados.config.gramasManual !== undefined) {
+        const inp = document.getElementById("gramas-manual");
+        if (document.activeElement !== inp) inp.value = dados.config.gramasManual;
+      }
+    } catch (e) {
+      setConn(false);
+    }
+  }
+ 
+  // init
+  document.getElementById("gramas-manual").dispatchEvent(new Event("input"));
+  atualizar();
+  setInterval(atualizar, 2000);   // atualiza a cada 2s
+</script>
+ 
+</body>
+</html>
