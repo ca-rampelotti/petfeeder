@@ -1,0 +1,15 @@
+{
+  "alerta": "sem racao",
+  "alertaNivel": "baixo",
+  "comando": {
+    "abrirPorta": false
+  },
+  "config": {
+    "gramasManual": 10,
+    "horarios": "16:37:30"
+  },
+  "nivelPercentual": 0,
+  "status": "IDLE",
+  "ultimaPorcaoGramas": 10,
+  "ultimaPorcaoHora": "16:47"
+}
