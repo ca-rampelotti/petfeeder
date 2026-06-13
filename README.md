@@ -36,14 +36,6 @@ A comunicação entre tarefas usa **fila** (comandos) e **mutex** (proteção do
 - Sensor ultrassônico HC-SR04 (nível de ração)
 - Estrutura impressa em 3D (reservatório, comporta, suporte)
 
-## Configuração
-
-1. Abra `petfeeder.ino` na Arduino IDE.
-2. Preencha as credenciais no topo do arquivo (WiFi e Firebase).
-3. Instale as bibliotecas: `ESP32Servo`, `Firebase Arduino Client Library for ESP8266 and ESP32` (Mobizt).
-4. Selecione a placa **ESP32 Dev Module** e faça o upload.
-5. Abra `app/petfeeder.html` no navegador e preencha o secret do Firebase para usar a interface.
-
 ## Estrutura do Firebase (Realtime Database)
 
 ```
