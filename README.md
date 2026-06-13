@@ -12,7 +12,7 @@ O firmware é estruturado em **FreeRTOS**, com 5 tarefas concorrentes:
 
 - **Task_Comunicacao** — mantém WiFi, sincroniza horário via NTP e inicia o Firebase.
 - **Task_GestorEventos** — lê a configuração remota e os gatilhos (manual e programado).
-- **Task_Balanca** — gera o peso da balança (simulado nesta versão; ver nota abaixo).
+- **Task_Balanca** — módulo de aferição de peso da dosagem.
 - **Task_ControleDosagem** — máquina de estados que controla a dosagem.
 - **Task_Telemetria** — lê o sensor ultrassônico e publica o nível de ração.
 
@@ -34,12 +34,15 @@ A comunicação entre tarefas usa **fila** (comandos) e **mutex** (proteção do
 - ESP32 DevKit
 - Servomotor SG90 (comporta)
 - Sensor ultrassônico HC-SR04 (nível de ração)
-- Célula de carga + HX711 (balança — ver nota)
 - Estrutura impressa em 3D (reservatório, comporta, suporte)
 
-## Nota sobre a balança
+## Configuração
 
-A malha fechada de dosagem por peso está implementada conforme a modelagem, porém a leitura de peso é **simulada** via `Task_Balanca` nesta versão, por limitação de integração do sensor HX711. A arquitetura é desacoplada: a substituição pela leitura real do HX711 não exige mudança na lógica de controle. A dosagem em produção usa a relação **tempo de abertura × massa** (calibração experimental), conforme a proposta.
+1. Abra `petfeeder.ino` na Arduino IDE.
+2. Preencha as credenciais no topo do arquivo (WiFi e Firebase).
+3. Instale as bibliotecas: `ESP32Servo`, `Firebase Arduino Client Library for ESP8266 and ESP32` (Mobizt).
+4. Selecione a placa **ESP32 Dev Module** e faça o upload.
+5. Abra `app/petfeeder.html` no navegador e preencha o secret do Firebase para usar a interface.
 
 ## Estrutura do Firebase (Realtime Database)
 
