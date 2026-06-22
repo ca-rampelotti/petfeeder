@@ -4,10 +4,10 @@
 #include <addons/RTDBHelper.h>
 
 // ---------- Credenciais ----------
-#define WIFI_SSID       "REDE"
-#define WIFI_PASSWORD   "SENHA"
-#define DATABASE_URL    "URL FIREBASE"
-#define DATABASE_SECRET "SECRET FIREBASE"
+#define WIFI_SSID       "iPhone de Carlos Augusto"
+#define WIFI_PASSWORD   "12345678"
+#define DATABASE_URL    "https://petfeeder-198ba-default-rtdb.firebaseio.com/"
+#define DATABASE_SECRET "jburrf9G05ldDYpDrOPUmG2qelhwAhx2Dy67Yxla"
 
 // ---------- Pinos ----------
 const int PINO_SERVO = 14;
@@ -22,6 +22,8 @@ const float DIST_POTE_CHEIO = 7.0;
 const float FATOR_S_POR_G   = 0.1;   // tempo de abertura por grama
 const int   TOLERANCIA_NIVEL = 2;    // % minimo de queda de racao
 const int   NIVEL_MINIMO     = 15;   // alarme de reposicao de racao
+const unsigned long TEMPO_MIN_ABRINDO_MS = 300;
+const unsigned long TEMPO_MIN_FECHADO_MS = 1000;
 
 // ---------- NTP (fuso de Brasilia, GMT-3) ----------
 const long GMT_OFFSET_SEC  = -3 * 3600;
@@ -37,6 +39,17 @@ enum EstadoDosagem {
 };
 volatile EstadoDosagem estado = SERVO_IDLE;
 
+// ---------- Eventos da maquina de dosagem ----------
+enum EventoDosagem {
+  EV_NONE,
+  EV_COMANDO,
+  EV_PROCESSAR,
+  EV_TEMPO_DOSAGEM,
+  EV_TEMPO_FECHAMENTO,
+  EV_ESTABILIZOU,
+  TOTAL_EVENTOS_DOSAGEM
+};
+
 // ---------- Parametros vindos do Firebase ----------
 volatile int gramasManual = 20;
 volatile int gramasDaVez  = 20;
@@ -45,7 +58,6 @@ int ultimoMinutoDisparo   = -1;
 
 // ---------- Balanca simulada ----------
 volatile float pesoAtual      = 0.0;
-volatile float pesoAlvo       = 0.0;
 volatile bool  comportaAberta = false;
 
 // ---------- Objetos e primitivas FreeRTOS ----------
@@ -56,6 +68,25 @@ FirebaseConfig config;
 QueueHandle_t filaComandos;
 SemaphoreHandle_t mutexPeso;
 SemaphoreHandle_t mutexFirebase;
+
+// ============================================================
+//  Estrutura da FSM
+// ============================================================
+struct ContextoDosagem {
+  int cmd = 0;
+  int nivelAntes = 0;
+  unsigned long entradaEstado = 0;
+  unsigned long inicioDosagem = 0;
+  unsigned long inicioFechamento = 0;
+  unsigned long inicioEstab = 0;
+};
+
+typedef void (*AcaoDosagem)(ContextoDosagem &ctx);
+
+struct Transicao {
+  EstadoDosagem proximoEstado;
+  AcaoDosagem acao;
+};
 
 // ============================================================
 //  Funcoes auxiliares
@@ -75,6 +106,32 @@ int calcularNivelPercentual(float dist) {
   if (n < 0)   n = 0;
   if (n > 100) n = 100;
   return (int)n;
+}
+
+const char *nomeEstadoDosagem(EstadoDosagem estadoAtual) {
+  switch (estadoAtual) {
+    case SERVO_IDLE:
+      return "IDLE";
+    case SERVO_ABRINDO:
+      return "ABRINDO";
+    case SERVO_ABERTO:
+      return "ABERTO";
+    case SERVO_FECHANDO:
+      return "FECHANDO";
+    case SERVO_FECHADO:
+      return "FECHADO";
+  }
+
+  return "DESCONHECIDO";
+}
+
+void publicarEstadoDosagem(EstadoDosagem estadoAtual) {
+  if (xSemaphoreTake(mutexFirebase, portMAX_DELAY)) {
+    if (Firebase.ready()) {
+      Firebase.RTDB.setString(&fbdo, "/status", nomeEstadoDosagem(estadoAtual));
+    }
+    xSemaphoreGive(mutexFirebase);
+  }
 }
 
 void fecharServoLento() {
@@ -117,6 +174,145 @@ bool horarioDeAlimentar() {
     lista = lista.substring(virg + 1);
   }
   return false;
+}
+
+// ============================================================
+//  Funcoes de acao da FSM
+// ============================================================
+void acaoPrepararDosagem(ContextoDosagem &ctx) {
+  (void)ctx;
+}
+
+void acaoAbrirServo(ContextoDosagem &ctx) {
+  ctx.nivelAntes = calcularNivelPercentual(lerDistanciaCm());
+  Serial.printf(">> Nivel antes: %d%%\n", ctx.nivelAntes);
+
+  if (xSemaphoreTake(mutexPeso, portMAX_DELAY)) {
+    pesoAtual = 0.0;
+    comportaAberta = true;
+    xSemaphoreGive(mutexPeso);
+  }
+
+  meuServo.write(ANGULO_ABERTO);
+
+  ctx.inicioDosagem = millis();
+  Serial.printf(">> [ABRINDO] dosando %dg por %.1fs\n", gramasDaVez, gramasDaVez * FATOR_S_POR_G);
+}
+
+void acaoEncerrarDosagem(ContextoDosagem &ctx) {
+  if (xSemaphoreTake(mutexPeso, portMAX_DELAY)) {
+    comportaAberta = false;
+    xSemaphoreGive(mutexPeso);
+  }
+
+  fecharServoLento();
+  ctx.inicioFechamento = millis();
+  Serial.println(">> [ABERTO] tempo de dosagem concluido");
+}
+
+void acaoIniciarEstabilizacao(ContextoDosagem &ctx) {
+  ctx.inicioEstab = millis();
+}
+
+void acaoFinalizarDosagem(ContextoDosagem &ctx) {
+  int nivelDepois = calcularNivelPercentual(lerDistanciaCm());
+  int queda = ctx.nivelAntes - nivelDepois;
+  bool caiuArroz = (queda >= TOLERANCIA_NIVEL);
+  Serial.printf(">> Nivel depois: %d%% | queda: %d%%\n", nivelDepois, queda);
+
+  if (xSemaphoreTake(mutexFirebase, portMAX_DELAY)) {
+    if (Firebase.ready()) {
+      Firebase.RTDB.setInt(&fbdo, "/ultimaPorcaoGramas", gramasDaVez);
+      Firebase.RTDB.setInt(&fbdo, "/nivelPercentual", nivelDepois);
+      struct tm t;
+      char horaStr[6] = "--:--";
+      if (getLocalTime(&t)) sprintf(horaStr, "%02d:%02d", t.tm_hour, t.tm_min);
+      Firebase.RTDB.setString(&fbdo, "/ultimaPorcaoHora", horaStr);
+      Firebase.RTDB.setString(&fbdo, "/alerta", caiuArroz ? "ok" : "sem racao");
+    }
+    xSemaphoreGive(mutexFirebase);
+  }
+
+  Serial.println(caiuArroz ? ">> [FECHADO] racao caiu OK"
+                           : ">> [FECHADO] ALERTA: nao detectou queda de nivel!");
+}
+
+// ============================================================
+//  Matriz de transicao
+// ============================================================
+const Transicao MATRIZ_TRANSICOES[][TOTAL_EVENTOS_DOSAGEM] = {
+  {
+    {SERVO_IDLE,      NULL},
+    {SERVO_ABRINDO,   acaoPrepararDosagem},
+    {SERVO_IDLE,      NULL},
+    {SERVO_IDLE,      NULL},
+    {SERVO_IDLE,      NULL},
+    {SERVO_IDLE,      NULL}
+  },
+  {
+    {SERVO_ABRINDO,   NULL},
+    {SERVO_ABRINDO,   NULL},
+    {SERVO_ABERTO,    acaoAbrirServo},
+    {SERVO_ABRINDO,   NULL},
+    {SERVO_ABRINDO,   NULL},
+    {SERVO_ABRINDO,   NULL}
+  },
+  {
+    {SERVO_ABERTO,    NULL},
+    {SERVO_ABERTO,    NULL},
+    {SERVO_ABERTO,    NULL},
+    {SERVO_FECHANDO,  acaoEncerrarDosagem},
+    {SERVO_ABERTO,    NULL},
+    {SERVO_ABERTO,    NULL}
+  },
+  {
+    {SERVO_FECHANDO,  NULL},
+    {SERVO_FECHANDO,  NULL},
+    {SERVO_FECHANDO,  NULL},
+    {SERVO_FECHANDO,  NULL},
+    {SERVO_FECHADO,   acaoIniciarEstabilizacao},
+    {SERVO_FECHANDO,  NULL}
+  },
+  {
+    {SERVO_FECHADO,   NULL},
+    {SERVO_FECHADO,   NULL},
+    {SERVO_FECHADO,   NULL},
+    {SERVO_FECHADO,   NULL},
+    {SERVO_FECHADO,   NULL},
+    {SERVO_IDLE,      acaoFinalizarDosagem}
+  }
+};
+
+// ============================================================
+//  Funcao de deteccao de eventos
+// ============================================================
+EventoDosagem detectarEventoDosagem(ContextoDosagem &ctx) {
+  switch (estado) {
+    case SERVO_IDLE:
+      if (xQueueReceive(filaComandos, &ctx.cmd, pdMS_TO_TICKS(100))) return EV_COMANDO;
+      return EV_NONE;
+
+    case SERVO_ABRINDO:
+      if (millis() - ctx.entradaEstado >= TEMPO_MIN_ABRINDO_MS) return EV_PROCESSAR;
+      return EV_NONE;
+
+    case SERVO_ABERTO:
+      if (millis() - ctx.inicioDosagem >= (unsigned long)(gramasDaVez * FATOR_S_POR_G * 1000)
+          || millis() - ctx.inicioDosagem >= 15000) {
+        return EV_TEMPO_DOSAGEM;
+      }
+      return EV_NONE;
+
+    case SERVO_FECHANDO:
+      if (millis() - ctx.inicioFechamento >= 1000) return EV_TEMPO_FECHAMENTO;
+      return EV_NONE;
+
+    case SERVO_FECHADO:
+      if (millis() - ctx.inicioEstab >= TEMPO_MIN_FECHADO_MS) return EV_ESTABILIZOU;
+      return EV_NONE;
+  }
+
+  return EV_NONE;
 }
 
 // ============================================================
@@ -199,7 +395,7 @@ void Task_GestorEventos(void *pv) {
 void Task_Balanca(void *pv) {
   for (;;) {
     if (xSemaphoreTake(mutexPeso, portMAX_DELAY)) {
-      if (comportaAberta) pesoAtual += 5.0;
+      if (comportaAberta) pesoAtual += 1.0;
       xSemaphoreGive(mutexPeso);
     }
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -210,83 +406,31 @@ void Task_Balanca(void *pv) {
 //  TASK 4 - Controle de Dosagem
 // ============================================================
 void Task_ControleDosagem(void *pv) {
-  int cmd;
-  int nivelAntes = 0;
-  unsigned long inicioDosagem = 0, inicioFechamento = 0, inicioEstab = 0;
+  (void)pv;
+  ContextoDosagem contexto;
+  EstadoDosagem estadoAnterior = estado;
+
+  contexto.entradaEstado = millis();
+  publicarEstadoDosagem(estado);
 
   for (;;) {
-    switch (estado) {
+    EventoDosagem evento = detectarEventoDosagem(contexto);
+    const Transicao &transicao = MATRIZ_TRANSICOES[estado][evento];
+    EstadoDosagem proximoEstado = transicao.proximoEstado;
 
-      case SERVO_IDLE:
-        if (xQueueReceive(filaComandos, &cmd, pdMS_TO_TICKS(100))) {
-          pesoAlvo = gramasDaVez;
-          estado = SERVO_ABRINDO;
-        }
-        break;
+    if (transicao.acao != NULL) {
+      transicao.acao(contexto);
+    }
 
-      case SERVO_ABRINDO:
-        nivelAntes = calcularNivelPercentual(lerDistanciaCm());
-        Serial.printf(">> Nivel antes: %d%%\n", nivelAntes);
-        if (xSemaphoreTake(mutexPeso, portMAX_DELAY)) {
-          pesoAtual = 0.0; comportaAberta = true;
-          xSemaphoreGive(mutexPeso);
-        }
-        meuServo.write(ANGULO_ABERTO);
-        if (xSemaphoreTake(mutexFirebase, portMAX_DELAY)) {
-          if (Firebase.ready()) Firebase.RTDB.setString(&fbdo, "/status", "ABERTO");
-          xSemaphoreGive(mutexFirebase);
-        }
-        inicioDosagem = millis();
-        Serial.printf(">> [ABRINDO] dosando %dg por %.1fs\n", gramasDaVez, gramasDaVez * FATOR_S_POR_G);
-        estado = SERVO_ABERTO;
-        break;
+    estado = proximoEstado;
 
-      case SERVO_ABERTO:
-        if (millis() - inicioDosagem >= (unsigned long)(gramasDaVez * FATOR_S_POR_G * 1000)
-            || millis() - inicioDosagem >= 15000) {
-          if (xSemaphoreTake(mutexPeso, portMAX_DELAY)) {
-            comportaAberta = false;
-            xSemaphoreGive(mutexPeso);
-          }
-          fecharServoLento();
-          inicioFechamento = millis();
-          Serial.println(">> [ABERTO] tempo de dosagem concluido");
-          estado = SERVO_FECHANDO;
-        }
-        break;
-
-      case SERVO_FECHANDO:
-        if (millis() - inicioFechamento >= 1000) {
-          inicioEstab = millis();
-          estado = SERVO_FECHADO;
-        }
-        break;
-
-      case SERVO_FECHADO:
-        if (millis() - inicioEstab >= 500) {
-          int nivelDepois = calcularNivelPercentual(lerDistanciaCm());
-          int queda = nivelAntes - nivelDepois;
-          bool caiuArroz = (queda >= TOLERANCIA_NIVEL);
-          Serial.printf(">> Nivel depois: %d%% | queda: %d%%\n", nivelDepois, queda);
-
-          if (xSemaphoreTake(mutexFirebase, portMAX_DELAY)) {
-            if (Firebase.ready()) {
-              Firebase.RTDB.setInt(&fbdo, "/ultimaPorcaoGramas", gramasDaVez);
-              Firebase.RTDB.setInt(&fbdo, "/nivelPercentual", nivelDepois);
-              Firebase.RTDB.setString(&fbdo, "/status", "IDLE");
-              struct tm t;
-              char horaStr[6] = "--:--";
-              if (getLocalTime(&t)) sprintf(horaStr, "%02d:%02d", t.tm_hour, t.tm_min);
-              Firebase.RTDB.setString(&fbdo, "/ultimaPorcaoHora", horaStr);
-              Firebase.RTDB.setString(&fbdo, "/alerta", caiuArroz ? "ok" : "sem racao");
-            }
-            xSemaphoreGive(mutexFirebase);
-          }
-          Serial.println(caiuArroz ? ">> [FECHADO] racao caiu OK"
-                                   : ">> [FECHADO] ALERTA: nao detectou queda de nivel!");
-          estado = SERVO_IDLE;
-        }
-        break;
+    if (estado != estadoAnterior) {
+      contexto.entradaEstado = millis();
+      Serial.printf("[FSM] %s -> %s\n",
+                    nomeEstadoDosagem(estadoAnterior),
+                    nomeEstadoDosagem(estado));
+      publicarEstadoDosagem(estado);
+      estadoAnterior = estado;
     }
     vTaskDelay(pdMS_TO_TICKS(50));
   }

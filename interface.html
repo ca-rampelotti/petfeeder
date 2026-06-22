@@ -225,8 +225,8 @@
  
 <script>
   // ====== CONFIG ======
-  const DB_URL = "FIREBASE URL";
-  const SECRET = "FIREBASE SECRET";
+  const DB_URL = "https://petfeeder-198ba-default-rtdb.firebaseio.com/";
+  const SECRET = "jburrf9G05ldDYpDrOPUmG2qelhwAhx2Dy67Yxla";
   const FATOR_S_POR_G = 0.1;
   // ====================
  
@@ -381,7 +381,7 @@
   // init
   document.getElementById("gramas-manual").dispatchEvent(new Event("input"));
   atualizar();
-  setInterval(atualizar, 2000);   // atualiza a cada 2s
+  setInterval(atualizar, 200);   // atualiza a cada 200ms para captar estados transitórios
 </script>
  
 </body>
